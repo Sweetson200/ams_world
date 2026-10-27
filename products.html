@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Products</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .product-image {
+      height: 220px;
+      object-fit: contain;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand bg-body-tertiary border-bottom">
+    <div class="container">
+      <a class="navbar-brand" href="index.html">AMS World</a>
+      <div class="navbar-nav">
+        <a class="nav-link" href="brands.html">Brands</a>
+        <a class="nav-link active" aria-current="page" href="products.html">Products</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container py-4">
+    <header class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3 mb-4">
+      <div>
+        <h1 class="mb-1">Products</h1>
+        <p id="mobile-count" class="text-secondary mb-0">Loading mobiles…</p>
+      </div>
+      <button id="refresh-mobiles" class="btn btn-outline-primary" type="button">Refresh</button>
+    </header>
+    <section id="mobile-grid" class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-4" aria-label="Mobile products" hidden></section>
+    <p id="mobile-status" class="text-secondary text-center p-4 mb-0" role="status" aria-live="polite">Loading mobiles…</p>
+  </main>
+  <script>
+    const mobilesEndpoint = "http://localhost/ams-world/api/mobiles";
+    const mobileCount = document.querySelector("#mobile-count");
+    const refreshMobilesButton = document.querySelector("#refresh-mobiles");
+    const mobileStatus = document.querySelector("#mobile-status");
+    const mobileGrid = document.querySelector("#mobile-grid");
+
+    function getMobiles(payload) {
+      if (Array.isArray(payload)) {
+        return payload;
+      }
+
+      if (payload && typeof payload === "object") {
+        const collection = payload.value ?? payload.items ?? payload.data;
+        if (Array.isArray(collection)) {
+          return collection;
+        }
+      }
+
+      throw new Error("The mobiles API returned an unexpected response.");
+    }
+
+    function showMobileStatus(message, isError = false) {
+      mobileStatus.textContent = message;
+      mobileStatus.classList.toggle("text-danger", isError);
+      mobileStatus.classList.toggle("text-secondary", !isError);
+      mobileStatus.hidden = false;
+      mobileGrid.hidden = true;
+    }
+
+    function getMobileValue(mobile, names) {
+      if (!mobile || typeof mobile !== "object") {
+        return "";
+      }
+
+      const property = Object.keys(mobile).find((key) =>
+        names.includes(key.toLowerCase())
+      );
+      const value = property ? mobile[property] : "";
+      return value == null || typeof value === "object" ? "" : String(value);
+    }
+
+    function renderMobiles(mobiles) {
+      mobileGrid.replaceChildren();
+
+      if (mobiles.length === 0) {
+        mobileCount.textContent = "0 mobiles";
+        showMobileStatus("No mobiles found.");
+        return;
+      }
+
+      for (const mobile of mobiles) {
+        const imageUrl = getMobileValue(mobile, ["imageurl", "image", "photo", "photourl", "url"]);
+        const modelName = getMobileValue(mobile, ["modelname", "model", "name"]);
+        const price = getMobileValue(mobile, ["price"]);
+
+        const column = document.createElement("div");
+        const card = document.createElement("article");
+        card.className = "card h-100";
+
+        if (imageUrl) {
+          const image = document.createElement("img");
+          image.className = "card-img-top product-image p-3";
+          image.src = imageUrl;
+          image.alt = modelName;
+          card.append(image);
+        }
+
+        const details = document.createElement("div");
+        details.className = "card-body";
+        const name = document.createElement("h2");
+        name.className = "h5 card-title";
+        name.textContent = modelName;
+        const priceText = document.createElement("p");
+        priceText.className = "card-text fw-semibold mb-0";
+        priceText.textContent = price;
+        details.append(name, priceText);
+        card.append(details);
+        column.append(card);
+        mobileGrid.append(column);
+      }
+
+      mobileCount.textContent = `${mobiles.length} ${mobiles.length === 1 ? "mobile" : "mobiles"}`;
+      mobileStatus.hidden = true;
+      mobileGrid.hidden = false;
+    }
+
+    async function loadMobiles() {
+      refreshMobilesButton.disabled = true;
+      mobileCount.textContent = "Loading mobiles…";
+      showMobileStatus("Loading mobiles…");
+
+      try {
+        const response = await fetch(mobilesEndpoint);
+        if (!response.ok) {
+          throw new Error(`The mobiles API returned HTTP ${response.status}.`);
+        }
+
+        renderMobiles(getMobiles(await response.json()));
+      } catch (error) {
+        mobileCount.textContent = "Unable to load mobiles";
+        showMobileStatus(
+          error instanceof Error ? error.message : "Unable to load mobiles.",
+          true
+        );
+      } finally {
+        refreshMobilesButton.disabled = false;
+      }
+    }
+
+    refreshMobilesButton.addEventListener("click", loadMobiles);
+    loadMobiles();
+  </script>
+</body>
+</html>

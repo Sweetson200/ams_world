@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brands</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    #chat-messages {
+      min-height: 120px;
+      max-height: 360px;
+    }
+
+    .chat-message {
+      max-width: 85%;
+      white-space: pre-wrap;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand bg-body-tertiary border-bottom">
+    <div class="container">
+      <a class="navbar-brand" href="index.html">AMS World</a>
+      <div class="navbar-nav">
+        <a class="nav-link active" aria-current="page" href="brands.html">Brands</a>
+        <a class="nav-link" href="products.html">Products</a>
+      </div>
+    </div>
+  </nav>
+  <main class="container py-4">
+    <header class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3 mb-4">
+      <div>
+        <h1 class="mb-1">Brands</h1>
+        <p id="brand-count" class="text-secondary mb-0">Loading brands…</p>
+      </div>
+      <button id="refresh" class="btn btn-outline-primary" type="button">Refresh</button>
+    </header>
+    <form id="create-brand-form" class="card card-body mb-4">
+      <h2 id="brand-form-title" class="h5 mb-3">Create brand</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label for="brand-name" class="form-label">Name</label>
+          <input id="brand-name" class="form-control" name="name" type="text" required>
+        </div>
+        <div class="col-md-6">
+          <label for="brand-contact-number" class="form-label">Contact number</label>
+          <input id="brand-contact-number" class="form-control" name="contactNumber" type="tel" required>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+        <button id="create-brand-submit" class="btn btn-primary" type="submit">Create brand</button>
+        <button id="cancel-brand-edit" class="btn btn-outline-secondary" type="button" hidden>Cancel</button>
+        <p id="create-brand-status" class="text-success mb-0" role="status" aria-live="polite"></p>
+      </div>
+    </form>
+    <section class="card" aria-label="Brand information">
+      <div class="table-responsive">
+        <table id="brand-table" class="table table-striped table-hover mb-0" hidden>
+          <thead class="table-light"><tr id="brand-head"></tr></thead>
+          <tbody id="brand-rows"></tbody>
+        </table>
+      </div>
+      <p id="status" class="text-secondary text-center p-4 mb-0" role="status" aria-live="polite">Loading brands…</p>
+    </section>
+    <section class="card card-body mt-4" aria-labelledby="chat-title">
+      <h2 id="chat-title" class="h5">Chat</h2>
+      <div id="chat-messages" class="d-flex flex-column gap-2 overflow-auto bg-body-tertiary border rounded p-3" role="log" aria-live="polite" aria-relevant="additions">
+        <p id="chat-empty" class="text-secondary mb-0">Send a message to start chatting.</p>
+      </div>
+      <form id="chat-form" class="d-flex align-items-end gap-2">
+        <label for="chat-message" hidden>Message</label>
+        <textarea id="chat-message" class="form-control flex-grow-1" name="message" rows="2" placeholder="Type a message…" required></textarea>
+        <button id="send-chat" class="btn btn-primary" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const endpoint = "http://localhost/ams-world/api/brands";
+    const chatEndpoint = "http://localhost/ams-world/api/chat";
+    const countElement = document.querySelector("#brand-count");
+    const refreshButton = document.querySelector("#refresh");
+    const createBrandForm = document.querySelector("#create-brand-form");
+    const createBrandSubmit = document.querySelector("#create-brand-submit");
+    const createBrandStatus = document.querySelector("#create-brand-status");
+    const brandFormTitle = document.querySelector("#brand-form-title");
+    const cancelBrandEdit = document.querySelector("#cancel-brand-edit");
+    const brandNameInput = document.querySelector("#brand-name");
+    const brandContactInput = document.querySelector("#brand-contact-number");
+    const statusElement = document.querySelector("#status");
+    const tableElement = document.querySelector("#brand-table");
+    const headerRow = document.querySelector("#brand-head");
+    const brandRows = document.querySelector("#brand-rows");
+    const chatForm = document.querySelector("#chat-form");
+    const chatInput = document.querySelector("#chat-message");
+    const chatSendButton = document.querySelector("#send-chat");
+    const chatMessages = document.querySelector("#chat-messages");
+    const chatEmpty = document.querySelector("#chat-empty");
+    let editingBrandId = null;
+    let currentBrands = [];
+
+    function getBrands(payload) {
+      if (Array.isArray(payload)) {
+        return payload;
+      }
+
+      if (payload && typeof payload === "object") {
+        const collection = payload.value ?? payload.items ?? payload.data;
+        if (Array.isArray(collection)) {
+          return collection;
+        }
+      }
+
+      throw new Error("The brands API returned an unexpected response.");
+    }
+
+    function showStatus(message, isError = false) {
+      statusElement.textContent = message;
+      statusElement.classList.toggle("text-danger", isError);
+      statusElement.classList.toggle("text-secondary", !isError);
+      statusElement.hidden = false;
+      tableElement.hidden = true;
+    }
+
+    function renderBrands(brands, payload) {
+      currentBrands = brands;
+      headerRow.replaceChildren();
+      brandRows.replaceChildren();
+
+      const fields = [...new Set(brands.flatMap((brand) =>
+        brand && typeof brand === "object" ? Object.keys(brand) : []
+      ))];
+
+      if (brands.length === 0 || fields.length === 0) {
+        countElement.textContent = "0 brands";
+        showStatus("No brands found.");
+        return;
+      }
+
+      for (const field of fields) {
+        const heading = document.createElement("th");
+        heading.scope = "col";
+        heading.textContent = field;
+        headerRow.append(heading);
+      }
+      const actionsHeading = document.createElement("th");
+      actionsHeading.scope = "col";
+      actionsHeading.textContent = "Actions";
+      headerRow.append(actionsHeading);
+
+      for (const brand of brands) {
+        const row = document.createElement("tr");
+        for (const field of fields) {
+          const cell = document.createElement("td");
+          const value = brand && typeof brand === "object" ? brand[field] : "";
+          cell.textContent = value == null
+            ? ""
+            : typeof value === "object"
+              ? JSON.stringify(value)
+              : String(value);
+          row.append(cell);
+        }
+        const actionsCell = document.createElement("td");
+        if (brand && typeof brand === "object" && brand.id != null) {
+          const editButton = document.createElement("button");
+          editButton.type = "button";
+          editButton.className = "btn btn-sm btn-outline-primary";
+          editButton.dataset.brandId = String(brand.id);
+          editButton.textContent = "Edit";
+          actionsCell.append(editButton);
+        }
+        row.append(actionsCell);
+        brandRows.append(row);
+      }
+
+      const reportedCount = payload && typeof payload === "object"
+        ? payload.Count ?? payload.count
+        : undefined;
+      const count = Number.isFinite(Number(reportedCount))
+        ? Number(reportedCount)
+        : brands.length;
+      countElement.textContent = `${count} ${count === 1 ? "brand" : "brands"}`;
+      statusElement.hidden = true;
+      tableElement.hidden = false;
+    }
+
+    function showCreateBrandStatus(message, isError = false) {
+      createBrandStatus.textContent = message;
+      createBrandStatus.classList.toggle("text-danger", isError);
+      createBrandStatus.classList.toggle("text-success", !isError);
+    }
+
+    function appendChatMessage(kind, label, message) {
+      chatEmpty.hidden = true;
+      const entry = document.createElement("div");
+      entry.className = "chat-message rounded p-2 text-break";
+      if (kind === "user") {
+        entry.classList.add("bg-primary", "text-white", "align-self-end");
+      } else if (kind === "assistant") {
+        entry.classList.add("bg-white", "border", "align-self-start");
+      } else {
+        entry.classList.add("bg-danger-subtle", "text-danger", "align-self-start");
+      }
+
+      const heading = document.createElement("strong");
+      heading.className = "d-block";
+      heading.textContent = label;
+      const content = document.createElement("p");
+      content.className = "mb-0";
+      content.textContent = message;
+      entry.append(heading, content);
+      chatMessages.append(entry);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function resetBrandForm() {
+      editingBrandId = null;
+      createBrandForm.reset();
+      brandFormTitle.textContent = "Create brand";
+      createBrandSubmit.textContent = "Create brand";
+      cancelBrandEdit.hidden = true;
+      showCreateBrandStatus("");
+    }
+
+    function startBrandEdit(brand) {
+      editingBrandId = String(brand.id);
+      brandNameInput.value = brand.name ?? "";
+      brandContactInput.value = brand.contactNumber ?? "";
+      brandFormTitle.textContent = `Update brand ${editingBrandId}`;
+      createBrandSubmit.textContent = "Save changes";
+      cancelBrandEdit.hidden = false;
+      showCreateBrandStatus("");
+      brandNameInput.focus();
+    }
+
+    async function loadBrands() {
+      refreshButton.disabled = true;
+      countElement.textContent = "Loading brands…";
+      showStatus("Loading brands…");
+
+      try {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          throw new Error(`The brands API returned HTTP ${response.status}.`);
+        }
+
+        const payload = await response.json();
+        renderBrands(getBrands(payload), payload);
+      } catch (error) {
+        countElement.textContent = "Unable to load brands";
+        showStatus(error instanceof Error ? error.message : "Unable to load brands.", true);
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    createBrandForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      createBrandSubmit.disabled = true;
+      const isEditing = editingBrandId !== null;
+      showCreateBrandStatus(isEditing ? "Updating brand…" : "Creating brand…");
+
+      const formData = new FormData(createBrandForm);
+      const brand = {
+        name: String(formData.get("name")).trim(),
+        contactNumber: String(formData.get("contactNumber")).trim()
+      };
+
+      try {
+        const url = isEditing
+          ? `${endpoint}/${encodeURIComponent(editingBrandId)}`
+          : endpoint;
+        const response = await fetch(url, {
+          method: isEditing ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(brand)
+        });
+
+        if (!response.ok) {
+          throw new Error(
+            `Unable to ${isEditing ? "update" : "create"} brand: HTTP ${response.status}.`
+          );
+        }
+
+        resetBrandForm();
+        showCreateBrandStatus(`Brand ${isEditing ? "updated" : "created"} successfully.`);
+        await loadBrands();
+      } catch (error) {
+        showCreateBrandStatus(
+          error instanceof Error
+            ? error.message
+            : `Unable to ${isEditing ? "update" : "create"} brand.`,
+          true
+        );
+      } finally {
+        createBrandSubmit.disabled = false;
+      }
+    });
+
+    brandRows.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const editButton = target.closest("button[data-brand-id]");
+      if (!editButton) {
+        return;
+      }
+
+      const brand = currentBrands.find(
+        (item) => String(item.id) === editButton.dataset.brandId
+      );
+      if (brand) {
+        startBrandEdit(brand);
+      }
+    });
+
+    refreshButton.addEventListener("click", loadBrands);
+    cancelBrandEdit.addEventListener("click", resetBrandForm);
+    loadBrands();
+
+    chatForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = chatInput.value.trim();
+      if (!message) {
+        return;
+      }
+
+      chatSendButton.disabled = true;
+      chatInput.disabled = true;
+      appendChatMessage("user", "You", message);
+      chatInput.value = "";
+
+      try {
+        const response = await fetch(chatEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message })
+        });
+
+        if (!response.ok) {
+          throw new Error(`The chat API returned HTTP ${response.status}.`);
+        }
+
+        const payload = await response.json();
+        if (!payload || typeof payload.response !== "string") {
+          throw new Error("The chat API returned an unexpected response.");
+        }
+
+        appendChatMessage("assistant", "Assistant", payload.response);
+      } catch (error) {
+        appendChatMessage(
+          "error",
+          "Error",
+          error instanceof Error ? error.message : "Unable to send message."
+        );
+      } finally {
+        chatSendButton.disabled = false;
+        chatInput.disabled = false;
+        chatInput.focus();
+      }
+    });
+  </script>
+</body>
+</html>
